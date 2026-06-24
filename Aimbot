@@ -1,0 +1,1188 @@
+--// ChatGPT Aimbot - Studio Testing Product
+--// Compact Mobile Aim Assist + Prediction + ESP + Sight Glow + Workspace Settings Save
+--// Roblox Studio testing only
+--// Put this LocalScript in StarterPlayer > StarterPlayerScripts
+
+local Players = game:GetService("Players")
+local RunService = game:GetService("RunService")
+local UserInputService = game:GetService("UserInputService")
+local TweenService = game:GetService("TweenService")
+local CollectionService = game:GetService("CollectionService")
+local HttpService = game:GetService("HttpService")
+
+local LocalPlayer = Players.LocalPlayer
+local Camera = workspace.CurrentCamera
+
+workspace:GetPropertyChangedSignal("CurrentCamera"):Connect(function()
+	Camera = workspace.CurrentCamera
+end)
+
+--// WORKSPACE SAVE FOLDER
+local SAVE_FOLDER_NAME = "Chatgpt Aimbot"
+local SAVE_VALUE_NAME = "SavedSettings"
+
+local SaveFolder = workspace:FindFirstChild(SAVE_FOLDER_NAME)
+if not SaveFolder then
+	SaveFolder = Instance.new("Folder")
+	SaveFolder.Name = SAVE_FOLDER_NAME
+	SaveFolder.Parent = workspace
+end
+
+local SaveValue = SaveFolder:FindFirstChild(SAVE_VALUE_NAME)
+if not SaveValue then
+	SaveValue = Instance.new("StringValue")
+	SaveValue.Name = SAVE_VALUE_NAME
+	SaveValue.Value = ""
+	SaveValue.Parent = SaveFolder
+end
+
+--// DEFAULT SETTINGS
+local Settings = {
+	Enabled = false,
+	Mode = "ClosestToCamera", -- ClosestToCamera / ClosestDistance
+	TargetPart = "Head", -- Head / Torso
+	IgnoreWalls = false,
+	TeamCheck = true,
+
+	FOV = 180,
+	Strength = 0.45,
+	MaxDistance = 1000,
+	ShowFOV = true,
+
+	Prediction = false,
+	PredictionTime = 0.12,
+
+	SightGlow = "Green", -- Green / Red / Off
+
+	ESP = {
+		Enabled = false,
+		Highlights = true,
+		Names = true,
+		TeamCheck = false,
+		MaxDistance = 1000,
+	},
+
+	GUI = {
+		XScale = 1,
+		XOffset = -275,
+		YScale = 0.32,
+		YOffset = 0,
+	}
+}
+
+local function applySavedSettings(target, saved)
+	for key, value in pairs(saved) do
+		if typeof(value) == "table" and typeof(target[key]) == "table" then
+			applySavedSettings(target[key], value)
+		elseif target[key] ~= nil then
+			target[key] = value
+		end
+	end
+end
+
+local function loadSettings()
+	if SaveValue.Value == "" then
+		return
+	end
+
+	local success, decoded = pcall(function()
+		return HttpService:JSONDecode(SaveValue.Value)
+	end)
+
+	if success and typeof(decoded) == "table" then
+		applySavedSettings(Settings, decoded)
+	end
+end
+
+local saveDebounce = false
+
+local function saveSettings()
+	if saveDebounce then
+		return
+	end
+
+	saveDebounce = true
+
+	task.defer(function()
+		saveDebounce = false
+
+		local success, encoded = pcall(function()
+			return HttpService:JSONEncode(Settings)
+		end)
+
+		if success then
+			SaveValue.Value = encoded
+		end
+	end)
+end
+
+loadSettings()
+
+--// OPTIONAL NPC SUPPORT:
+--// Put NPC models inside workspace.AimAssistTargets
+--// OR tag NPC models with CollectionService tag: "AimAssistTarget"
+
+--// GUI SETUP
+local PlayerGui = LocalPlayer:WaitForChild("PlayerGui")
+
+local oldGui = PlayerGui:FindFirstChild("AimAssistTesterGui")
+if oldGui then
+	oldGui:Destroy()
+end
+
+--// Clean old local ESP/glow objects
+for _, obj in ipairs(workspace:GetDescendants()) do
+	if obj.Name == "LocalStudioESP_Highlight"
+		or obj.Name == "LocalStudioESP_Billboard"
+		or obj.Name == "LocalStudioSightGlow" then
+		obj:Destroy()
+	end
+end
+
+local ScreenGui = Instance.new("ScreenGui")
+ScreenGui.Name = "AimAssistTesterGui"
+ScreenGui.ResetOnSpawn = false
+ScreenGui.IgnoreGuiInset = true
+ScreenGui.Parent = PlayerGui
+
+local function corner(obj, radius)
+	local c = Instance.new("UICorner")
+	c.CornerRadius = UDim.new(0, radius or 10)
+	c.Parent = obj
+end
+
+local function stroke(obj, thickness, transparency)
+	local s = Instance.new("UIStroke")
+	s.Thickness = thickness or 1
+	s.Transparency = transparency or 0.55
+	s.Color = Color3.fromRGB(255, 255, 255)
+	s.Parent = obj
+	return s
+end
+
+local function tween(obj, props, t)
+	TweenService:Create(
+		obj,
+		TweenInfo.new(t or 0.14, Enum.EasingStyle.Quad, Enum.EasingDirection.Out),
+		props
+	):Play()
+end
+
+local panelWidth = 260
+local panelHeight = 335
+
+local Main = Instance.new("Frame")
+Main.Name = "Main"
+Main.Size = UDim2.fromOffset(panelWidth, panelHeight)
+Main.Position = UDim2.new(
+	Settings.GUI.XScale,
+	Settings.GUI.XOffset,
+	Settings.GUI.YScale,
+	Settings.GUI.YOffset
+)
+Main.BackgroundColor3 = Color3.fromRGB(16, 16, 23)
+Main.BorderSizePixel = 0
+Main.ZIndex = 10
+Main.Parent = ScreenGui
+corner(Main, 14)
+stroke(Main, 1, 0.62)
+
+local Bubble = Instance.new("TextButton")
+Bubble.Size = UDim2.fromOffset(48, 48)
+Bubble.Position = UDim2.new(1, -62, 0.45, 0)
+Bubble.BackgroundColor3 = Color3.fromRGB(20, 20, 28)
+Bubble.Text = "AIM"
+Bubble.TextColor3 = Color3.fromRGB(255, 255, 255)
+Bubble.Font = Enum.Font.GothamBold
+Bubble.TextSize = 12
+Bubble.AutoButtonColor = false
+Bubble.Visible = false
+Bubble.ZIndex = 20
+Bubble.Parent = ScreenGui
+corner(Bubble, 15)
+stroke(Bubble, 1, 0.5)
+
+local Header = Instance.new("Frame")
+Header.Size = UDim2.new(1, 0, 0, 34)
+Header.BackgroundColor3 = Color3.fromRGB(27, 27, 38)
+Header.BorderSizePixel = 0
+Header.ZIndex = 11
+Header.Parent = Main
+corner(Header, 14)
+
+local Title = Instance.new("TextLabel")
+Title.Size = UDim2.new(1, -45, 1, 0)
+Title.Position = UDim2.fromOffset(11, 0)
+Title.BackgroundTransparency = 1
+Title.Text = "ChatGPT Aim Test"
+Title.TextColor3 = Color3.fromRGB(255, 255, 255)
+Title.TextXAlignment = Enum.TextXAlignment.Left
+Title.Font = Enum.Font.GothamBold
+Title.TextSize = 14
+Title.ZIndex = 12
+Title.Parent = Header
+
+local Close = Instance.new("TextButton")
+Close.Size = UDim2.fromOffset(28, 24)
+Close.Position = UDim2.new(1, -34, 0, 5)
+Close.BackgroundColor3 = Color3.fromRGB(45, 45, 60)
+Close.Text = "×"
+Close.TextColor3 = Color3.fromRGB(255, 255, 255)
+Close.Font = Enum.Font.GothamBold
+Close.TextSize = 16
+Close.AutoButtonColor = false
+Close.ZIndex = 12
+Close.Parent = Header
+corner(Close, 8)
+
+local Tabs = Instance.new("Frame")
+Tabs.Size = UDim2.new(1, -14, 0, 30)
+Tabs.Position = UDim2.fromOffset(7, 40)
+Tabs.BackgroundTransparency = 1
+Tabs.ZIndex = 12
+Tabs.Parent = Main
+
+local TabLayout = Instance.new("UIListLayout")
+TabLayout.FillDirection = Enum.FillDirection.Horizontal
+TabLayout.Padding = UDim.new(0, 6)
+TabLayout.SortOrder = Enum.SortOrder.LayoutOrder
+TabLayout.Parent = Tabs
+
+local AimTab = Instance.new("TextButton")
+AimTab.Size = UDim2.new(0.5, -3, 1, 0)
+AimTab.BackgroundColor3 = Color3.fromRGB(44, 135, 86)
+AimTab.Text = "AIM"
+AimTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+AimTab.Font = Enum.Font.GothamBold
+AimTab.TextSize = 12
+AimTab.AutoButtonColor = false
+AimTab.ZIndex = 13
+AimTab.Parent = Tabs
+corner(AimTab, 9)
+
+local ESPTab = Instance.new("TextButton")
+ESPTab.Size = UDim2.new(0.5, -3, 1, 0)
+ESPTab.BackgroundColor3 = Color3.fromRGB(36, 36, 49)
+ESPTab.Text = "ESP"
+ESPTab.TextColor3 = Color3.fromRGB(255, 255, 255)
+ESPTab.Font = Enum.Font.GothamBold
+ESPTab.TextSize = 12
+ESPTab.AutoButtonColor = false
+ESPTab.ZIndex = 13
+ESPTab.Parent = Tabs
+corner(ESPTab, 9)
+
+local Pages = Instance.new("Frame")
+Pages.Size = UDim2.new(1, -14, 1, -78)
+Pages.Position = UDim2.fromOffset(7, 76)
+Pages.BackgroundTransparency = 1
+Pages.ZIndex = 12
+Pages.Parent = Main
+
+local AimPage = Instance.new("Frame")
+AimPage.Size = UDim2.new(1, 0, 1, 0)
+AimPage.BackgroundTransparency = 1
+AimPage.ZIndex = 12
+AimPage.Parent = Pages
+
+local ESPPage = Instance.new("Frame")
+ESPPage.Size = UDim2.new(1, 0, 1, 0)
+ESPPage.BackgroundTransparency = 1
+ESPPage.Visible = false
+ESPPage.ZIndex = 12
+ESPPage.Parent = Pages
+
+local function addVerticalLayout(parent)
+	local layout = Instance.new("UIListLayout")
+	layout.Padding = UDim.new(0, 6)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = parent
+	return layout
+end
+
+addVerticalLayout(AimPage)
+addVerticalLayout(ESPPage)
+
+local function makeStatus(parent, text)
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, 0, 0, 24)
+	label.BackgroundColor3 = Color3.fromRGB(25, 25, 34)
+	label.Text = text
+	label.TextColor3 = Color3.fromRGB(215, 215, 215)
+	label.Font = Enum.Font.Gotham
+	label.TextSize = 11
+	label.ZIndex = 13
+	label.Parent = parent
+	corner(label, 8)
+	return label
+end
+
+local TargetLabel = makeStatus(AimPage, "Target: None")
+local ESPStatus = makeStatus(ESPPage, "ESP: 0 targets")
+
+local function makeGrid(parent, height)
+	local grid = Instance.new("Frame")
+	grid.Size = UDim2.new(1, 0, 0, height)
+	grid.BackgroundTransparency = 1
+	grid.ZIndex = 13
+	grid.Parent = parent
+
+	local layout = Instance.new("UIGridLayout")
+	layout.CellSize = UDim2.new(0.5, -3, 0, 30)
+	layout.CellPadding = UDim2.fromOffset(6, 6)
+	layout.SortOrder = Enum.SortOrder.LayoutOrder
+	layout.Parent = grid
+
+	return grid
+end
+
+local function makeButton(parent, text)
+	local b = Instance.new("TextButton")
+	b.BackgroundColor3 = Color3.fromRGB(36, 36, 49)
+	b.BorderSizePixel = 0
+	b.Text = text
+	b.TextColor3 = Color3.fromRGB(245, 245, 245)
+	b.Font = Enum.Font.GothamBold
+	b.TextSize = 10
+	b.AutoButtonColor = false
+	b.ZIndex = 14
+	b.Parent = parent
+	corner(b, 8)
+	stroke(b, 1, 0.78)
+	return b
+end
+
+local function makeAdjustRow(parent, labelText)
+	local row = Instance.new("Frame")
+	row.Size = UDim2.new(1, 0, 0, 29)
+	row.BackgroundTransparency = 1
+	row.ZIndex = 13
+	row.Parent = parent
+
+	local minus = Instance.new("TextButton")
+	minus.Size = UDim2.fromOffset(35, 29)
+	minus.Position = UDim2.fromOffset(0, 0)
+	minus.BackgroundColor3 = Color3.fromRGB(36, 36, 49)
+	minus.BorderSizePixel = 0
+	minus.Text = "-"
+	minus.TextColor3 = Color3.fromRGB(255, 255, 255)
+	minus.Font = Enum.Font.GothamBold
+	minus.TextSize = 15
+	minus.ZIndex = 14
+	minus.Parent = row
+	corner(minus, 8)
+	stroke(minus, 1, 0.78)
+
+	local label = Instance.new("TextLabel")
+	label.Size = UDim2.new(1, -80, 1, 0)
+	label.Position = UDim2.fromOffset(40, 0)
+	label.BackgroundColor3 = Color3.fromRGB(25, 25, 34)
+	label.BorderSizePixel = 0
+	label.Text = labelText
+	label.TextColor3 = Color3.fromRGB(230, 230, 230)
+	label.Font = Enum.Font.GothamBold
+	label.TextSize = 10
+	label.ZIndex = 14
+	label.Parent = row
+	corner(label, 8)
+
+	local plus = Instance.new("TextButton")
+	plus.Size = UDim2.fromOffset(35, 29)
+	plus.Position = UDim2.new(1, -35, 0, 0)
+	plus.BackgroundColor3 = Color3.fromRGB(36, 36, 49)
+	plus.BorderSizePixel = 0
+	plus.Text = "+"
+	plus.TextColor3 = Color3.fromRGB(255, 255, 255)
+	plus.Font = Enum.Font.GothamBold
+	plus.TextSize = 15
+	plus.ZIndex = 14
+	plus.Parent = row
+	corner(plus, 8)
+	stroke(plus, 1, 0.78)
+
+	return minus, label, plus
+end
+
+--// AIM PAGE UI
+local AimGrid = makeGrid(AimPage, 138)
+
+local EnabledBtn = makeButton(AimGrid, "AIM: OFF")
+local ModeBtn = makeButton(AimGrid, "MODE: CAM")
+local PartBtn = makeButton(AimGrid, "PART: HEAD")
+local WallsBtn = makeButton(AimGrid, "WALL: BLOCK")
+local TeamBtn = makeButton(AimGrid, "TEAM: ON")
+local PredictBtn = makeButton(AimGrid, "PRED: OFF")
+local ShowFOVBtn = makeButton(AimGrid, "FOV: ON")
+local SightGlowBtn = makeButton(AimGrid, "GLOW: GREEN")
+
+local FOVMinus, FOVLabel, FOVPlus = makeAdjustRow(AimPage, "FOV: 180")
+local StrengthMinus, StrengthLabel, StrengthPlus = makeAdjustRow(AimPage, "SMOOTH: 0.45")
+local PredictMinus, PredictLabel, PredictPlus = makeAdjustRow(AimPage, "PRED TIME: 0.12")
+
+--// ESP PAGE UI
+local ESPGrid = makeGrid(ESPPage, 66)
+
+local ESPEnabledBtn = makeButton(ESPGrid, "ESP: OFF")
+local ESPHighlightBtn = makeButton(ESPGrid, "HIGHLIGHT: ON")
+local ESPNamesBtn = makeButton(ESPGrid, "NAMES: ON")
+local ESPTeamBtn = makeButton(ESPGrid, "TEAM: OFF")
+
+local ESPDistMinus, ESPDistLabel, ESPDistPlus = makeAdjustRow(ESPPage, "ESP DIST: 1000")
+
+--// FOV CIRCLE
+local FOVCircle = Instance.new("Frame")
+FOVCircle.Name = "FOVCircle"
+FOVCircle.AnchorPoint = Vector2.new(0.5, 0.5)
+FOVCircle.BackgroundTransparency = 1
+FOVCircle.BorderSizePixel = 0
+FOVCircle.ZIndex = 2
+FOVCircle.Parent = ScreenGui
+
+local fovCorner = Instance.new("UICorner")
+fovCorner.CornerRadius = UDim.new(1, 0)
+fovCorner.Parent = FOVCircle
+
+local fovStroke = Instance.new("UIStroke")
+fovStroke.Thickness = 1.3
+fovStroke.Transparency = 0.45
+fovStroke.Color = Color3.fromRGB(255, 255, 255)
+fovStroke.Parent = FOVCircle
+
+local function styleToggle(button, active)
+	if active then
+		button.BackgroundColor3 = Color3.fromRGB(44, 135, 86)
+	else
+		button.BackgroundColor3 = Color3.fromRGB(36, 36, 49)
+	end
+end
+
+local function setActiveTab(tab)
+	if tab == "Aim" then
+		AimPage.Visible = true
+		ESPPage.Visible = false
+		AimTab.BackgroundColor3 = Color3.fromRGB(44, 135, 86)
+		ESPTab.BackgroundColor3 = Color3.fromRGB(36, 36, 49)
+	else
+		AimPage.Visible = false
+		ESPPage.Visible = true
+		AimTab.BackgroundColor3 = Color3.fromRGB(36, 36, 49)
+		ESPTab.BackgroundColor3 = Color3.fromRGB(44, 135, 86)
+	end
+end
+
+local function updateButtons()
+	EnabledBtn.Text = Settings.Enabled and "AIM: ON" or "AIM: OFF"
+	styleToggle(EnabledBtn, Settings.Enabled)
+
+	ModeBtn.Text = Settings.Mode == "ClosestToCamera" and "MODE: CAM" or "MODE: DIST"
+
+	PartBtn.Text = "PART: " .. string.upper(Settings.TargetPart)
+
+	WallsBtn.Text = Settings.IgnoreWalls and "WALL: IGNORE" or "WALL: BLOCK"
+	styleToggle(WallsBtn, Settings.IgnoreWalls)
+
+	TeamBtn.Text = Settings.TeamCheck and "TEAM: ON" or "TEAM: OFF"
+	styleToggle(TeamBtn, Settings.TeamCheck)
+
+	PredictBtn.Text = Settings.Prediction and "PRED: ON" or "PRED: OFF"
+	styleToggle(PredictBtn, Settings.Prediction)
+
+	ShowFOVBtn.Text = Settings.ShowFOV and "FOV: ON" or "FOV: OFF"
+	styleToggle(ShowFOVBtn, Settings.ShowFOV)
+
+	SightGlowBtn.Text = "GLOW: " .. string.upper(Settings.SightGlow)
+	styleToggle(SightGlowBtn, Settings.SightGlow ~= "Off")
+
+	FOVLabel.Text = "FOV: " .. tostring(Settings.FOV)
+	StrengthLabel.Text = "SMOOTH: " .. string.format("%.2f", Settings.Strength)
+	PredictLabel.Text = "PRED TIME: " .. string.format("%.2f", Settings.PredictionTime)
+
+	ESPEnabledBtn.Text = Settings.ESP.Enabled and "ESP: ON" or "ESP: OFF"
+	styleToggle(ESPEnabledBtn, Settings.ESP.Enabled)
+
+	ESPHighlightBtn.Text = Settings.ESP.Highlights and "HIGHLIGHT: ON" or "HIGHLIGHT: OFF"
+	styleToggle(ESPHighlightBtn, Settings.ESP.Highlights)
+
+	ESPNamesBtn.Text = Settings.ESP.Names and "NAMES: ON" or "NAMES: OFF"
+	styleToggle(ESPNamesBtn, Settings.ESP.Names)
+
+	ESPTeamBtn.Text = Settings.ESP.TeamCheck and "TEAM: ON" or "TEAM: OFF"
+	styleToggle(ESPTeamBtn, Settings.ESP.TeamCheck)
+
+	ESPDistLabel.Text = "ESP DIST: " .. tostring(Settings.ESP.MaxDistance)
+end
+
+local function changed()
+	updateButtons()
+	saveSettings()
+end
+
+--// UI EVENTS
+AimTab.Activated:Connect(function()
+	setActiveTab("Aim")
+end)
+
+ESPTab.Activated:Connect(function()
+	setActiveTab("ESP")
+end)
+
+Close.Activated:Connect(function()
+	Main.Visible = false
+	Bubble.Visible = true
+end)
+
+Bubble.Activated:Connect(function()
+	Main.Visible = true
+	Bubble.Visible = false
+end)
+
+EnabledBtn.Activated:Connect(function()
+	Settings.Enabled = not Settings.Enabled
+	changed()
+end)
+
+ModeBtn.Activated:Connect(function()
+	Settings.Mode = Settings.Mode == "ClosestToCamera" and "ClosestDistance" or "ClosestToCamera"
+	changed()
+end)
+
+PartBtn.Activated:Connect(function()
+	Settings.TargetPart = Settings.TargetPart == "Head" and "Torso" or "Head"
+	changed()
+end)
+
+WallsBtn.Activated:Connect(function()
+	Settings.IgnoreWalls = not Settings.IgnoreWalls
+	changed()
+end)
+
+TeamBtn.Activated:Connect(function()
+	Settings.TeamCheck = not Settings.TeamCheck
+	changed()
+end)
+
+PredictBtn.Activated:Connect(function()
+	Settings.Prediction = not Settings.Prediction
+	changed()
+end)
+
+ShowFOVBtn.Activated:Connect(function()
+	Settings.ShowFOV = not Settings.ShowFOV
+	changed()
+end)
+
+SightGlowBtn.Activated:Connect(function()
+	if Settings.SightGlow == "Green" then
+		Settings.SightGlow = "Red"
+	elseif Settings.SightGlow == "Red" then
+		Settings.SightGlow = "Off"
+	else
+		Settings.SightGlow = "Green"
+	end
+
+	changed()
+end)
+
+FOVMinus.Activated:Connect(function()
+	Settings.FOV = math.clamp(Settings.FOV - 20, 40, 600)
+	changed()
+end)
+
+FOVPlus.Activated:Connect(function()
+	Settings.FOV = math.clamp(Settings.FOV + 20, 40, 600)
+	changed()
+end)
+
+StrengthMinus.Activated:Connect(function()
+	Settings.Strength = math.clamp(Settings.Strength - 0.05, 0.05, 1)
+	changed()
+end)
+
+StrengthPlus.Activated:Connect(function()
+	Settings.Strength = math.clamp(Settings.Strength + 0.05, 0.05, 1)
+	changed()
+end)
+
+PredictMinus.Activated:Connect(function()
+	Settings.PredictionTime = math.clamp(Settings.PredictionTime - 0.02, 0, 0.5)
+	changed()
+end)
+
+PredictPlus.Activated:Connect(function()
+	Settings.PredictionTime = math.clamp(Settings.PredictionTime + 0.02, 0, 0.5)
+	changed()
+end)
+
+ESPEnabledBtn.Activated:Connect(function()
+	Settings.ESP.Enabled = not Settings.ESP.Enabled
+	changed()
+end)
+
+ESPHighlightBtn.Activated:Connect(function()
+	Settings.ESP.Highlights = not Settings.ESP.Highlights
+	changed()
+end)
+
+ESPNamesBtn.Activated:Connect(function()
+	Settings.ESP.Names = not Settings.ESP.Names
+	changed()
+end)
+
+ESPTeamBtn.Activated:Connect(function()
+	Settings.ESP.TeamCheck = not Settings.ESP.TeamCheck
+	changed()
+end)
+
+ESPDistMinus.Activated:Connect(function()
+	Settings.ESP.MaxDistance = math.clamp(Settings.ESP.MaxDistance - 100, 100, 5000)
+	changed()
+end)
+
+ESPDistPlus.Activated:Connect(function()
+	Settings.ESP.MaxDistance = math.clamp(Settings.ESP.MaxDistance + 100, 100, 5000)
+	changed()
+end)
+
+--// DRAGGING
+local dragging = false
+local dragStart
+local startPos
+
+Header.InputBegan:Connect(function(input)
+	if input.UserInputType == Enum.UserInputType.MouseButton1 or input.UserInputType == Enum.UserInputType.Touch then
+		dragging = true
+		dragStart = input.Position
+		startPos = Main.Position
+
+		input.Changed:Connect(function()
+			if input.UserInputState == Enum.UserInputState.End then
+				dragging = false
+
+				Settings.GUI.XScale = Main.Position.X.Scale
+				Settings.GUI.XOffset = Main.Position.X.Offset
+				Settings.GUI.YScale = Main.Position.Y.Scale
+				Settings.GUI.YOffset = Main.Position.Y.Offset
+				saveSettings()
+			end
+		end)
+	end
+end)
+
+UserInputService.InputChanged:Connect(function(input)
+	if dragging and (input.UserInputType == Enum.UserInputType.MouseMovement or input.UserInputType == Enum.UserInputType.Touch) then
+		local delta = input.Position - dragStart
+		Main.Position = UDim2.new(
+			startPos.X.Scale,
+			startPos.X.Offset + delta.X,
+			startPos.Y.Scale,
+			startPos.Y.Offset + delta.Y
+		)
+	end
+end)
+
+--// TARGETING HELPERS
+local function getTargetPart(character)
+	if not character then
+		return nil
+	end
+
+	if Settings.TargetPart == "Head" then
+		return character:FindFirstChild("Head")
+			or character:FindFirstChild("UpperTorso")
+			or character:FindFirstChild("Torso")
+			or character:FindFirstChild("HumanoidRootPart")
+	end
+
+	return character:FindFirstChild("UpperTorso")
+		or character:FindFirstChild("Torso")
+		or character:FindFirstChild("LowerTorso")
+		or character:FindFirstChild("HumanoidRootPart")
+		or character:FindFirstChild("Head")
+end
+
+local function getESPAdornee(character)
+	return character:FindFirstChild("Head")
+		or character:FindFirstChild("HumanoidRootPart")
+		or character:FindFirstChild("UpperTorso")
+		or character:FindFirstChild("Torso")
+end
+
+local function isValidCharacter(character)
+	if not character then
+		return false
+	end
+
+	local humanoid = character:FindFirstChildOfClass("Humanoid")
+	if not humanoid or humanoid.Health <= 0 then
+		return false
+	end
+
+	local part = getTargetPart(character)
+	if not part or not part:IsA("BasePart") then
+		return false
+	end
+
+	return true
+end
+
+local function hasLineOfSight(character, targetPart)
+	if Settings.IgnoreWalls then
+		return true
+	end
+
+	if not Camera or not targetPart then
+		return false
+	end
+
+	local origin = Camera.CFrame.Position
+	local direction = targetPart.Position - origin
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.IgnoreWater = true
+
+	local ignoreList = {}
+
+	if LocalPlayer.Character then
+		table.insert(ignoreList, LocalPlayer.Character)
+	end
+
+	params.FilterDescendantsInstances = ignoreList
+
+	local result = workspace:Raycast(origin, direction, params)
+
+	if result and result.Instance then
+		return result.Instance:IsDescendantOf(character)
+	end
+
+	return false
+end
+
+local function addCandidate(candidates, seen, character, ownerPlayer, teamCheck)
+	if not character or seen[character] then
+		return
+	end
+
+	if character == LocalPlayer.Character then
+		return
+	end
+
+	if ownerPlayer == LocalPlayer then
+		return
+	end
+
+	if ownerPlayer and teamCheck then
+		if LocalPlayer.Team ~= nil and ownerPlayer.Team ~= nil and LocalPlayer.Team == ownerPlayer.Team then
+			return
+		end
+	end
+
+	if not isValidCharacter(character) then
+		return
+	end
+
+	seen[character] = true
+
+	table.insert(candidates, {
+		Character = character,
+		Player = ownerPlayer,
+		Part = getTargetPart(character),
+	})
+end
+
+local function getCandidates(teamCheck)
+	local candidates = {}
+	local seen = {}
+
+	for _, player in ipairs(Players:GetPlayers()) do
+		if player ~= LocalPlayer then
+			addCandidate(candidates, seen, player.Character, player, teamCheck)
+		end
+	end
+
+	local folder = workspace:FindFirstChild("AimAssistTargets")
+	if folder then
+		for _, obj in ipairs(folder:GetDescendants()) do
+			if obj:IsA("Model") then
+				addCandidate(candidates, seen, obj, nil, teamCheck)
+			end
+		end
+	end
+
+	for _, obj in ipairs(CollectionService:GetTagged("AimAssistTarget")) do
+		local model = obj:IsA("Model") and obj or obj:FindFirstAncestorOfClass("Model")
+		if model then
+			addCandidate(candidates, seen, model, nil, teamCheck)
+		end
+	end
+
+	return candidates
+end
+
+local function getPredictedPosition(part)
+	if not Settings.Prediction then
+		return part.Position
+	end
+
+	local velocity = Vector3.zero
+
+	pcall(function()
+		velocity = part.AssemblyLinearVelocity
+	end)
+
+	return part.Position + velocity * Settings.PredictionTime
+end
+
+local function getBestTarget()
+	if not Camera then
+		return nil
+	end
+
+	local viewport = Camera.ViewportSize
+	local center = Vector2.new(viewport.X / 2, viewport.Y / 2)
+
+	local localCharacter = LocalPlayer.Character
+	local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+	local distanceOrigin = localRoot and localRoot.Position or Camera.CFrame.Position
+
+	local bestCandidate = nil
+	local bestScore = math.huge
+
+	for _, candidate in ipairs(getCandidates(Settings.TeamCheck)) do
+		local part = candidate.Part
+
+		if part and part.Parent then
+			local worldDistance = (part.Position - distanceOrigin).Magnitude
+
+			if worldDistance <= Settings.MaxDistance then
+				local aimPos = getPredictedPosition(part)
+				local screenPos, onScreen = Camera:WorldToViewportPoint(aimPos)
+
+				if onScreen and screenPos.Z > 0 then
+					local screenPoint = Vector2.new(screenPos.X, screenPos.Y)
+					local screenDistance = (screenPoint - center).Magnitude
+
+					if screenDistance <= Settings.FOV then
+						if hasLineOfSight(candidate.Character, part) then
+							local score
+
+							if Settings.Mode == "ClosestDistance" then
+								score = worldDistance
+							else
+								score = screenDistance
+							end
+
+							if score < bestScore then
+								bestScore = score
+								bestCandidate = candidate
+							end
+						end
+					end
+				end
+			end
+		end
+	end
+
+	return bestCandidate
+end
+
+local function shortName(name)
+	if #name > 16 then
+		return string.sub(name, 1, 16) .. "..."
+	end
+	return name
+end
+
+--// ESP SYSTEM
+local ESPObjects = {}
+
+local function getCandidateName(candidate)
+	if candidate.Player then
+		return candidate.Player.Name
+	end
+	return candidate.Character.Name
+end
+
+local function getCandidateColor(candidate)
+	if candidate.Player and candidate.Player.TeamColor then
+		return candidate.Player.TeamColor.Color
+	end
+
+	return Color3.fromRGB(70, 255, 160)
+end
+
+local function destroyESP(character)
+	local data = ESPObjects[character]
+	if not data then
+		return
+	end
+
+	if data.Highlight then
+		data.Highlight:Destroy()
+	end
+
+	if data.Billboard then
+		data.Billboard:Destroy()
+	end
+
+	ESPObjects[character] = nil
+end
+
+local function destroyAllESP()
+	for character in pairs(ESPObjects) do
+		destroyESP(character)
+	end
+end
+
+local function createOrUpdateESP(candidate, distance)
+	local character = candidate.Character
+	local adornee = getESPAdornee(character)
+
+	if not adornee then
+		destroyESP(character)
+		return
+	end
+
+	local data = ESPObjects[character]
+
+	if not data then
+		data = {}
+
+		local highlight = Instance.new("Highlight")
+		highlight.Name = "LocalStudioESP_Highlight"
+		highlight.Adornee = character
+		highlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		highlight.FillTransparency = 0.78
+		highlight.OutlineTransparency = 0
+		highlight.Parent = character
+
+		local billboard = Instance.new("BillboardGui")
+		billboard.Name = "LocalStudioESP_Billboard"
+		billboard.Adornee = adornee
+		billboard.AlwaysOnTop = true
+		billboard.Size = UDim2.fromOffset(130, 32)
+		billboard.StudsOffset = Vector3.new(0, 2.7, 0)
+		billboard.MaxDistance = Settings.ESP.MaxDistance
+		billboard.Parent = character
+
+		local label = Instance.new("TextLabel")
+		label.Size = UDim2.new(1, 0, 1, 0)
+		label.BackgroundTransparency = 0.25
+		label.BackgroundColor3 = Color3.fromRGB(15, 15, 22)
+		label.TextColor3 = Color3.fromRGB(255, 255, 255)
+		label.TextStrokeTransparency = 0.4
+		label.Font = Enum.Font.GothamBold
+		label.TextSize = 11
+		label.Parent = billboard
+		corner(label, 7)
+
+		data.Highlight = highlight
+		data.Billboard = billboard
+		data.Label = label
+		ESPObjects[character] = data
+	end
+
+	local color = getCandidateColor(candidate)
+
+	data.Highlight.Enabled = Settings.ESP.Enabled and Settings.ESP.Highlights
+	data.Highlight.FillColor = color
+	data.Highlight.OutlineColor = color
+	data.Highlight.Adornee = character
+
+	data.Billboard.Enabled = Settings.ESP.Enabled and Settings.ESP.Names
+	data.Billboard.Adornee = adornee
+	data.Billboard.MaxDistance = Settings.ESP.MaxDistance
+
+	data.Label.Text = shortName(getCandidateName(candidate)) .. " | " .. math.floor(distance) .. "s"
+end
+
+local espTimer = 0
+
+local function updateESP(dt)
+	espTimer += dt
+	if espTimer < 0.12 then
+		return
+	end
+	espTimer = 0
+
+	if not Settings.ESP.Enabled then
+		ESPStatus.Text = "ESP: OFF"
+		destroyAllESP()
+		return
+	end
+
+	local localCharacter = LocalPlayer.Character
+	local localRoot = localCharacter and localCharacter:FindFirstChild("HumanoidRootPart")
+	local origin = localRoot and localRoot.Position or (Camera and Camera.CFrame.Position)
+
+	if not origin then
+		return
+	end
+
+	local active = {}
+	local count = 0
+
+	for _, candidate in ipairs(getCandidates(Settings.ESP.TeamCheck)) do
+		local part = candidate.Part
+
+		if part then
+			local distance = (part.Position - origin).Magnitude
+
+			if distance <= Settings.ESP.MaxDistance then
+				active[candidate.Character] = true
+				count += 1
+				createOrUpdateESP(candidate, distance)
+			end
+		end
+	end
+
+	for character in pairs(ESPObjects) do
+		if not active[character] or not character.Parent then
+			destroyESP(character)
+		end
+	end
+
+	ESPStatus.Text = "ESP: " .. tostring(count) .. " targets"
+end
+
+--// CROSSHAIR SIGHT GLOW
+local SightGlowHighlight = nil
+local SightGlowTarget = nil
+
+local function clearSightGlow()
+	if SightGlowHighlight then
+		SightGlowHighlight:Destroy()
+		SightGlowHighlight = nil
+	end
+
+	SightGlowTarget = nil
+end
+
+local function getSightGlowColor()
+	if Settings.SightGlow == "Red" then
+		return Color3.fromRGB(255, 60, 60)
+	end
+
+	return Color3.fromRGB(60, 255, 120)
+end
+
+local function getCrosshairSightTarget()
+	if not Camera then
+		return nil
+	end
+
+	if not Settings.Enabled then
+		return nil
+	end
+
+	if Settings.SightGlow == "Off" then
+		return nil
+	end
+
+	local viewport = Camera.ViewportSize
+	local ray = Camera:ViewportPointToRay(viewport.X / 2, viewport.Y / 2)
+
+	local params = RaycastParams.new()
+	params.FilterType = Enum.RaycastFilterType.Exclude
+	params.IgnoreWater = true
+
+	local ignoreList = {}
+
+	if LocalPlayer.Character then
+		table.insert(ignoreList, LocalPlayer.Character)
+	end
+
+	params.FilterDescendantsInstances = ignoreList
+
+	local result = workspace:Raycast(ray.Origin, ray.Direction * Settings.MaxDistance, params)
+
+	if not result or not result.Instance then
+		return nil
+	end
+
+	for _, candidate in ipairs(getCandidates(Settings.TeamCheck)) do
+		if result.Instance:IsDescendantOf(candidate.Character) then
+			return candidate
+		end
+	end
+
+	return nil
+end
+
+local function updateSightGlow()
+	if not Settings.Enabled or Settings.SightGlow == "Off" then
+		clearSightGlow()
+		return
+	end
+
+	local candidate = getCrosshairSightTarget()
+
+	if not candidate then
+		clearSightGlow()
+		return
+	end
+
+	local character = candidate.Character
+	local glowColor = getSightGlowColor()
+
+	if SightGlowTarget ~= character then
+		clearSightGlow()
+
+		SightGlowHighlight = Instance.new("Highlight")
+		SightGlowHighlight.Name = "LocalStudioSightGlow"
+		SightGlowHighlight.Adornee = character
+		SightGlowHighlight.DepthMode = Enum.HighlightDepthMode.AlwaysOnTop
+		SightGlowHighlight.FillTransparency = 0.35
+		SightGlowHighlight.OutlineTransparency = 0
+		SightGlowHighlight.FillColor = glowColor
+		SightGlowHighlight.OutlineColor = glowColor
+		SightGlowHighlight.Parent = character
+
+		SightGlowTarget = character
+	else
+		SightGlowHighlight.FillColor = glowColor
+		SightGlowHighlight.OutlineColor = glowColor
+	end
+end
+
+--// MAIN LOOP
+RunService:BindToRenderStep("MobileAimAssistTester", Enum.RenderPriority.Camera.Value + 1, function(dt)
+	if not Camera then
+		return
+	end
+
+	local viewport = Camera.ViewportSize
+	FOVCircle.Position = UDim2.fromOffset(viewport.X / 2, viewport.Y / 2)
+	FOVCircle.Size = UDim2.fromOffset(Settings.FOV * 2, Settings.FOV * 2)
+	FOVCircle.Visible = Settings.Enabled and Settings.ShowFOV
+
+	updateESP(dt)
+	updateSightGlow()
+
+	if not Settings.Enabled then
+		TargetLabel.Text = "Target: None"
+		return
+	end
+
+	local target = getBestTarget()
+
+	if not target or not target.Part then
+		TargetLabel.Text = "Target: None"
+		return
+	end
+
+	local targetName = target.Player and target.Player.Name or target.Character.Name
+	TargetLabel.Text = "Target: " .. shortName(targetName)
+
+	local cameraPos = Camera.CFrame.Position
+	local targetPos = getPredictedPosition(target.Part)
+
+	local desiredCFrame = CFrame.lookAt(cameraPos, targetPos)
+
+	local alpha = 1 - math.exp(-Settings.Strength * 18 * dt)
+	Camera.CFrame = Camera.CFrame:Lerp(desiredCFrame, alpha)
+end)
+
+updateButtons()
+setActiveTab("Aim")
+saveSettings()
